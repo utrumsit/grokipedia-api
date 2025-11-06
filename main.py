@@ -197,7 +197,7 @@ async def get_page(
     slug: str,
     extract_refs: bool = Query(True),
     truncate: Optional[int] = Query(None),
-    citations: bool = Query(True)
+    citations: bool = Query(False)
 ):
     slug = normalize_slug(slug)
     
