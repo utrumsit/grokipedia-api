@@ -196,11 +196,12 @@ async def read_root():
 async def get_page(
     slug: str,
     extract_refs: bool = Query(True),
-    truncate: Optional[int] = Query(None)
+    truncate: Optional[int] = Query(None),
+    citations: bool = Query(True)
 ):
     slug = normalize_slug(slug)
     
-    cache_key = f"{slug}:{extract_refs}:{truncate or 'full'}"
+    cache_key = f"{slug}:{extract_refs}:{truncate or 'full'}:{citations}"
     now = datetime.now()
     
     if cache_key in _cache:
@@ -219,7 +220,10 @@ async def get_page(
     soup = BeautifulSoup(resp.text, "html.parser")
     
     # Clean up: remove unwanted tags, but preserve references div
-    for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+    unwanted_tags = ["script", "style", "nav", "header", "footer", "aside"]
+    if not citations:
+        unwanted_tags.append("sup")
+    for tag in soup(unwanted_tags):
         tag.decompose()
     
     content_div = find_content_div(soup)
