@@ -254,8 +254,7 @@ async def get_page(
     
     return page
 
-# @app.get("/health", include_in_schema=False)
-@app.get("/health")
+@app.get("/health", include_in_schema=False)
 async def health(key: str = Query(..., description="Secret key for health endpoint access")):
     health_secret = os.getenv("HEALTH_SECRET")  # Load from .env
     if not health_secret:
