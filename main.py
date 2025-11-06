@@ -49,7 +49,7 @@ if static_dir.exists() and os.getenv("VERCEL") is None:
 
 BASE_URL = "https://grokipedia.com"
 _cache = {}
-MAX_CACHE_SIZE = 1000  # Adjust as needed; keeps cache small (~50MB assuming avg 50KB/article)
+MAX_CACHE_SIZE = 1000  # Adjust as needed; keeps cache small (~50MB assuming avg 50KB/page)
 CACHE_TTL = timedelta(days=2)
 
 # Rate limiting setup
@@ -73,7 +73,7 @@ class Reference(BaseModel):
     number: int
     url: str = ""
 
-class Article(BaseModel):
+class Page(BaseModel):
     title: str
     slug: str
     url: str
@@ -167,8 +167,8 @@ def get_cache_size_bytes():
     """Calculate total memory size of the cache in bytes"""
     total = 0
     for key, value in _cache.items():
-        article, ts = value
-        total += get_size(key) + get_size(value)  # key is str, value is tuple (Article, datetime)
+        page, ts = value
+        total += get_size(key) + get_size(value)  # key is str, value is tuple (Page, datetime)
     return total
 
 def get_cached_slugs():
@@ -192,8 +192,8 @@ async def read_root():
             status_code=404
         )
 
-@app.get("/article/{slug:path}", response_model=Article, dependencies=[Depends(rate_limit_dependency)])
-async def get_article(
+@app.get("/page/{slug:path}", response_model=Page, dependencies=[Depends(rate_limit_dependency)])
+async def get_page(
     slug: str,
     extract_refs: bool = Query(True),
     truncate: Optional[int] = Query(None)
@@ -204,11 +204,11 @@ async def get_article(
     now = datetime.now()
     
     if cache_key in _cache:
-        article, ts = _cache[cache_key]
+        page, ts = _cache[cache_key]
         if now - ts > CACHE_TTL:
             _cache.pop(cache_key)
         else:
-            return article
+            return page
     
     url = f"{BASE_URL}/page/{urllib.parse.quote(slug)}"
     
@@ -235,7 +235,7 @@ async def get_article(
     
     references, refs_count = extract_references(soup) if extract_refs else ([], 0)
     
-    article_dict = {
+    page_dict = {
         "title": page_title,
         "slug": slug,
         "url": url,
@@ -245,16 +245,17 @@ async def get_article(
         "references_count": refs_count,
         "references": references,
     }
-    article = Article(**article_dict)
+    page = Page(**page_dict)
     
-    # Cache the new article (evict oldest if at max size)
+    # Cache the new page (evict oldest if at max size)
     if len(_cache) >= MAX_CACHE_SIZE:
         _cache.popitem(last=False)  # Evict oldest (FIFO)
-    _cache[cache_key] = (article, now)
+    _cache[cache_key] = (page, now)
     
-    return article
+    return page
 
-@app.get("/health", include_in_schema=False)
+# @app.get("/health", include_in_schema=False)
+@app.get("/health")
 async def health(key: str = Query(..., description="Secret key for health endpoint access")):
     health_secret = os.getenv("HEALTH_SECRET")  # Load from .env
     if not health_secret:

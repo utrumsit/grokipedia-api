@@ -1,10 +1,10 @@
 # Grokipedia API
-**Unofficial REST API for accessing full-text content and references from Grokipedia.com** (xAI's Wikipedia-inspired knowledge base with 885K+ articles). This API scrapes and caches articles for fast, developer-friendly access—ideal for AI tools, research apps, or data pipelines.
+**Unofficial REST API for accessing full-text content and references from Grokipedia.com** (xAI's Wikipedia-inspired knowledge base with 885K+ articles). This API scrapes and caches pages for fast, developer-friendly access—ideal for AI tools, research apps, or data pipelines.
 
 > **Disclaimer**: This is an unofficial, community-built tool. It is not affiliated with xAI or Grokipedia. Use responsibly and respect rate limits/terms of service. Grokipedia's structure may change, affecting reliability.
 
 ## Features
-* Full-Text Extraction: Get clean, parsed article text (up to ~50KB avg; truncate option available).
+* Full-Text Extraction: Get clean, parsed page text (up to ~50KB avg; truncate option available).
 * References: Optional list of citation URLs (numbered).
 * Caching: In-memory LRU cache (TTL: 2 days; max 1000 items) for performance.
 * Rate Limiting: 100 requests/min per IP (generous for testing).
@@ -13,12 +13,12 @@
 ## API Endpoints
 | Endpoint | Method | Description |Parameters | Response |
 |---|---|---|---|---|
-| /article/{slug} | GET | Fetch article by slug (e.g., "Elon_Musk").| Path: slug (str), Query: same as above | Article |
+| /page/{slug} | GET | Fetch page by slug (e.g., "Elon_Musk").| Path: slug (str), Query: same as above | Page |
 
 * Rate Limit: 100 req/min per IP. Exceeds → 429 Too Many Requests.
 * Errors: 400 (Bad Request), 401 (Unauthorized), 404 (Not Found), 500 (Internal).
 
-### Article Model
+### Page Model
 ```
 {
   "title": "Elon Musk",
@@ -37,24 +37,24 @@
 ## Usage Examples
 
 ### cURL (Basic)
-Fetch "Artificial intelligence" article:
+Fetch "Artificial intelligence" page:
 ```
-curl https://grokipedia-api.com/article/Artificial_intelligence
-```
-
-Fetch "Post-quantum cryptography" article:
-```
-curl https://grokipedia-api.com/article/Post-quantum_cryptography
+curl https://grokipedia-api.com/page/Artificial_intelligence
 ```
 
-Fetch "Austin, Texas" article:
+Fetch "Post-quantum cryptography" page:
 ```
-curl https://grokipedia-api.com/article/Austin,_Texas
+curl https://grokipedia-api.com/page/Post-quantum_cryptography
 ```
 
-Fetch "AT&T" article:
+Fetch "Austin, Texas" page:
 ```
-curl https://grokipedia-api.com/article/AT&T
+curl https://grokipedia-api.com/page/Austin,_Texas
+```
+
+Fetch "AT&T" page:
+```
+curl https://grokipedia-api.com/page/AT&T
 ```
 
 ## Contributing
