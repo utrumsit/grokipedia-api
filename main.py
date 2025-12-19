@@ -23,9 +23,9 @@ from dotenv import load_dotenv
 load_dotenv()  # Add this line to load .env
 
 app = FastAPI(
-    title="Grokipedia API v0.2",
+    title="Grokipedia API v0.3",
     description="Unofficial API for xAI's Grokipedia (not affiliated)",
-    version="0.2.0-beta",
+    version="0.3.0-beta",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -84,23 +84,14 @@ class Page(BaseModel):
     references: Optional[List[Reference]] = None
 
 def normalize_slug(input_str: str) -> str:
+    # FastAPI and query params automatically decode %26 to &
     # Handle potential double-encoding from browser address bar (e.g., typing "at%26t" sends "at%2526t", decoded to "at%26t")
     input_str = urllib.parse.unquote(input_str)
-    # FastAPI and query params automatically decode %26 to &, so input_str is already "AT&T" for such cases
-    # This function handles both raw "AT&T" and variations like "at & t"
-    # First, treat hyphens as spaces to unify with underscores and actual spaces
-    normalized = input_str.replace('-', ' ')
-    # Replace underscores with spaces to unify title and slug inputs
-    normalized = normalized.replace('_', ' ')
-    # Normalize ampersands: remove spaces around &
-    normalized = re.sub(r'\s*&\s*', '&', normalized)
-    has_ampersand = '&' in normalized
-    if has_ampersand:
-        normalized = normalized.upper()
-    else:
-        normalized = normalized.title()
-    # Now replace spaces with underscores (ensures consistent underscore usage, no hyphens)
-    normalized = re.sub(r'\s+', '_', normalized.strip())
+    # Replace space with underscore
+    normalized = input_str.replace(' ', '_')
+    # Check if first letter is capitalized
+    if not normalized[0].isupper():
+        normalized = normalized.capitalize()
     return normalized
 
 def find_content_div(soup: BeautifulSoup) -> BeautifulSoup:
