@@ -1,5 +1,5 @@
 # Grokipedia API
-**Unofficial REST API for accessing full-text content and references from Grokipedia.com** (xAI's Wikipedia-inspired knowledge base with 5M+ articles). This API scrapes and caches pages for fast, developer-friendly access—ideal for AI tools, research apps, or data pipelines.
+**Unofficial REST API for accessing full-text content and references from Grokipedia.com** (xAI's Wikipedia-inspired knowledge base with 6M+ articles). This API scrapes and caches pages for fast, developer-friendly access—ideal for AI tools, research apps, or data pipelines.
 
 > **Disclaimer**: This is an unofficial, community-built tool. It is not affiliated with xAI or Grokipedia. Use responsibly and respect rate limits/terms of service. Grokipedia's structure may change, affecting reliability.
 
