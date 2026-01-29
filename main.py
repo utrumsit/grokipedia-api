@@ -1,11 +1,12 @@
 # Unofficial API for xAI's Grokipedia (not affiliated)
+# Fork by utrumsit - adds Markdown output support
 from api_analytics.fastapi import Analytics
 from fastapi import FastAPI, HTTPException, Query, Request, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 import requests
 import re
 import urllib.parse
@@ -23,9 +24,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI(
-    title="Grokipedia API v0.3",
-    description="Unofficial API for xAI's Grokipedia (not affiliated)",
-    version="0.3.0-beta",
+    title="Grokipedia API v0.4",
+    description="Unofficial API for xAI's Grokipedia (not affiliated). Fork with Markdown support.",
+    version="0.4.0-beta",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -77,11 +78,181 @@ class Page(BaseModel):
     title: str
     slug: str
     url: str
-    content_text: str
+    content_text: str  # Plain text (legacy)
+    content_markdown: Optional[str] = None  # Markdown formatted
     char_count: int
     word_count: int
     references_count: int
     references: Optional[List[Reference]] = None
+
+
+# HTML to Markdown conversion
+BLOCK_TAGS = {'p', 'div', 'section', 'article', 'blockquote', 'li', 'tr', 'br', 'hr'}
+HEADER_TAGS = {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}
+INLINE_EMPHASIS_TAGS = {'i', 'em'}
+INLINE_STRONG_TAGS = {'b', 'strong'}
+INLINE_CODE_TAGS = {'code', 'tt'}
+SKIP_TAGS = {'script', 'style', 'nav', 'header', 'footer', 'aside', 'sup', 'sub'}
+# Tags whose content we want but that shouldn't add formatting (like spans, anchors to internal links)
+TRANSPARENT_TAGS = {'span', 'a', 'font', 'u'}
+
+
+def html_to_markdown(element: Tag, skip_metadata: bool = True) -> str:
+    """
+    Convert HTML element to clean Markdown, preserving inline formatting.
+
+    - Headers become ## Header
+    - <i>/<em> become *italic*
+    - <b>/<strong> become **bold**
+    - <a> links to other pages become *italic* (internal links are usually terms)
+    - <a> links to external URLs become [text](url)
+    - Block elements get paragraph breaks
+    - Inline elements flow naturally with surrounding text
+    """
+    seen_title = False
+    metadata_phrases = {'fact-checked by grok', 'weeks ago', 'days ago', 'hours ago', 'yesterday', 'month ago', 'months ago'}
+
+    def process_node(node, in_paragraph=False):
+        nonlocal seen_title
+
+        if isinstance(node, NavigableString):
+            text = str(node)
+            # Collapse whitespace but preserve single spaces
+            text = re.sub(r'\s+', ' ', text)
+            # Skip metadata text nodes
+            if skip_metadata and any(phrase in text.lower() for phrase in metadata_phrases):
+                return ''
+            return text
+
+        if not isinstance(node, Tag):
+            return ''
+
+        tag_name = node.name.lower() if node.name else ''
+
+        # Skip unwanted tags entirely
+        if tag_name in SKIP_TAGS:
+            return ''
+
+        # Handle headers
+        if tag_name in HEADER_TAGS:
+            level = int(tag_name[1])
+            header_text = node.get_text(strip=True)
+
+            # Skip the first h1 (it's the title, we handle that separately)
+            if tag_name == 'h1' and not seen_title:
+                seen_title = True
+                return ''
+
+            # Skip metadata-like headers
+            if any(phrase in header_text.lower() for phrase in metadata_phrases):
+                return ''
+
+            prefix = '#' * min(level, 6)
+            return f'\n\n{prefix} {header_text}\n\n'
+
+        # Handle block elements
+        if tag_name in BLOCK_TAGS:
+            inner = ''.join(process_node(child, in_paragraph=True) for child in node.children)
+            inner = inner.strip()
+
+            # Skip metadata lines
+            if skip_metadata and any(phrase in inner.lower() for phrase in metadata_phrases):
+                return ''
+
+            if not inner:
+                return ''
+
+            if tag_name == 'li':
+                return f'- {inner}\n'
+            elif tag_name == 'blockquote':
+                # Prefix each line with >
+                quoted = '\n'.join(f'> {line}' for line in inner.split('\n'))
+                return f'\n\n{quoted}\n\n'
+            elif tag_name == 'br':
+                return '\n'
+            elif tag_name == 'hr':
+                return '\n\n---\n\n'
+            else:
+                return f'\n\n{inner}\n\n'
+
+        # Handle lists
+        if tag_name in ('ul', 'ol'):
+            inner = ''.join(process_node(child) for child in node.children)
+            return f'\n\n{inner.strip()}\n\n'
+
+        # Handle inline emphasis
+        if tag_name in INLINE_EMPHASIS_TAGS:
+            inner = ''.join(process_node(child, in_paragraph=True) for child in node.children)
+            inner = inner.strip()
+            if inner:
+                return f'*{inner}*'
+            return ''
+
+        # Handle inline strong
+        if tag_name in INLINE_STRONG_TAGS:
+            inner = ''.join(process_node(child, in_paragraph=True) for child in node.children)
+            inner = inner.strip()
+            if inner:
+                return f'**{inner}**'
+            return ''
+
+        # Handle inline code
+        if tag_name in INLINE_CODE_TAGS:
+            inner = ''.join(process_node(child, in_paragraph=True) for child in node.children)
+            inner = inner.strip()
+            if inner:
+                return f'`{inner}`'
+            return ''
+
+        # Handle links
+        if tag_name == 'a':
+            href = node.get('href', '')
+            inner = ''.join(process_node(child, in_paragraph=True) for child in node.children)
+            inner = inner.strip()
+
+            if not inner:
+                return ''
+
+            # Internal Grokipedia links - just use the text
+            if href.startswith('/page/') or 'grokipedia.com' in href:
+                return f'*{inner}*'  # Italicize internal links (they're usually terms)
+
+            # External links - full markdown link
+            if href.startswith(('http://', 'https://', '//')):
+                return f'[{inner}]({href})'
+
+            # No href or relative - just text
+            return inner
+
+        # Handle images
+        if tag_name == 'img':
+            alt = node.get('alt', '')
+            src = node.get('src', '')
+            if src:
+                return f'![{alt}]({src})'
+            return ''
+
+        # Transparent tags and anything else - process children
+        return ''.join(process_node(child, in_paragraph) for child in node.children)
+
+    result = process_node(element)
+
+    # Clean up multiple newlines
+    result = re.sub(r'\n{3,}', '\n\n', result)
+
+    # Clean up spaces around newlines
+    result = re.sub(r' +\n', '\n', result)
+    result = re.sub(r'\n +', '\n', result)
+
+    # Remove leading/trailing whitespace from lines while preserving paragraph structure
+    lines = result.split('\n')
+    lines = [line.strip() for line in lines]
+    result = '\n'.join(lines)
+
+    # Final cleanup of excessive newlines
+    result = re.sub(r'\n{3,}', '\n\n', result)
+
+    return result.strip()
 
 def normalize_slug(input_str: str) -> str:
     # FastAPI and query params automatically decode %26 to &
@@ -94,15 +265,31 @@ def normalize_slug(input_str: str) -> str:
         normalized = normalized.capitalize()
     return normalized
 
-def find_content_div(soup: BeautifulSoup) -> BeautifulSoup:
-    div = soup.select_one('article.prose')  # Primary
+def find_content_div(soup: BeautifulSoup) -> Tag:
+    """Find the main content div, handling Grokipedia's nested structure."""
+    # Try article.prose first (older structure)
+    div = soup.select_one('article.prose')
     if div:
         return div
+
+    # Current structure: article > div (non-hidden with content)
+    article = soup.find('article')
+    if article:
+        for child in article.children:
+            if isinstance(child, Tag) and child.name == 'div':
+                classes = child.get('class', [])
+                if 'hidden' not in classes:
+                    # Check it has substantial content
+                    if len(child.get_text(strip=True)) > 100:
+                        return child
+
+    # Fallback selectors
     selectors = ['div.content', 'main', 'article']
     for sel in selectors:
         div = soup.select_one(sel)
         if div:
             return div
+
     return soup.body
 
 def extract_references(soup: BeautifulSoup) -> tuple[List[Reference], int]:
@@ -188,65 +375,72 @@ async def get_page(
     slug: str,
     extract_refs: bool = Query(True),
     truncate: Optional[int] = Query(None),
-    citations: bool = Query(False)
+    citations: bool = Query(False),
+    format: str = Query("markdown", description="Output format: 'markdown' (default) or 'text'")
 ):
     slug = normalize_slug(slug)
-    
-    cache_key = f"{slug}:{extract_refs}:{truncate or 'full'}:{citations}"
+
+    cache_key = f"{slug}:{extract_refs}:{truncate or 'full'}:{citations}:{format}"
     now = datetime.now()
-    
+
     if cache_key in _cache:
         page, ts = _cache[cache_key]
         if now - ts > CACHE_TTL:
             _cache.pop(cache_key)
         else:
             return page
-    
+
     url = f"{BASE_URL}/page/{urllib.parse.quote(slug)}"
-    
-    resp = requests.get(url, headers={"User-Agent": "Grokipedia-API/0.1"})
+
+    resp = requests.get(url, headers={"User-Agent": "Grokipedia-API/0.4"})
     if resp.status_code != 200:
         raise HTTPException(status_code=404, detail=f"Not found: {slug}")
-    
+
     soup = BeautifulSoup(resp.text, "html.parser")
-    
+
     # Clean up: remove unwanted tags, but preserve references div
     unwanted_tags = ["script", "style", "nav", "header", "footer", "aside"]
     if not citations:
         unwanted_tags.append("sup")
     for tag in soup(unwanted_tags):
         tag.decompose()
-    
+
     content_div = find_content_div(soup)
-    
+
     h1 = content_div.find("h1")
     page_title = h1.get_text(strip=True) if h1 else slug.replace("_", " ")
-    
+
+    # Generate both plain text and markdown
+    content_markdown = html_to_markdown(content_div, skip_metadata=True)
     content_text = re.sub(r'\n{3,}', '\n\n', content_div.get_text(separator="\n\n", strip=True))
+
+    # Apply truncation
     if truncate:
         content_text = content_text[:truncate]
-    
-    words = len(re.split(r'\s+', content_text.strip()))
-    
+        content_markdown = content_markdown[:truncate]
+
+    words = len(re.split(r'\s+', content_markdown.strip()))
+
     references, refs_count = extract_references(soup) if extract_refs else ([], 0)
-    
+
     page_dict = {
         "title": page_title,
         "slug": slug,
         "url": url,
         "content_text": content_text,
-        "char_count": len(content_text),
+        "content_markdown": content_markdown,
+        "char_count": len(content_markdown),
         "word_count": words,
         "references_count": refs_count,
         "references": references,
     }
     page = Page(**page_dict)
-    
+
     # Cache the new page (evict oldest if at max size)
     if len(_cache) >= MAX_CACHE_SIZE:
         _cache.popitem(last=False)  # Evict oldest (FIFO)
     _cache[cache_key] = (page, now)
-    
+
     return page
 
 @app.get("/health", include_in_schema=False)
